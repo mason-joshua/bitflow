@@ -284,3 +284,89 @@
     (ok amount)
   )
 )
+
+;; Payment refund processing
+(define-public (refund-payment (payment-id uint))
+  (let (
+      (caller tx-sender)
+      (payment (unwrap! (map-get? payments payment-id) ERR_PAYMENT_NOT_FOUND))
+      (customer (unwrap! (get customer payment) ERR_PAYMENT_NOT_FOUND))
+    )
+    (asserts! (is-eq caller (get business payment)) ERR_UNAUTHORIZED)
+    (asserts! (is-eq (get status payment) "completed")
+      ERR_PAYMENT_ALREADY_PROCESSED
+    )
+
+    (let (
+        (refund-amount (get amount payment))
+        (current-balance (default-to u0 (map-get? business-balances caller)))
+      )
+      (asserts! (>= current-balance refund-amount) ERR_INSUFFICIENT_BALANCE)
+
+      ;; Deduct from business balance
+      (map-set business-balances caller (- current-balance refund-amount))
+
+      ;; Execute refund transfer
+      (try! (as-contract (contract-call? 'ST1F7QA2MDF17S807EPA36TSS8AMEFY4KA9TVGWXT.sbtc-token
+        transfer refund-amount tx-sender customer none
+      )))
+
+      ;; Update payment status
+      (map-set payments payment-id
+        (merge payment {
+          status: "refunded",
+          processed-at: (some stacks-block-height),
+        })
+      )
+
+      (ok refund-amount)
+    )
+  )
+)
+
+;; ADMINISTRATIVE FUNCTIONS
+
+;; Platform fee configuration
+(define-public (set-platform-fee (new-fee-basis-points uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
+    (asserts! (<= new-fee-basis-points u1000) ERR_INVALID_AMOUNT) ;; Max 10%
+    (var-set platform-fee-basis-points new-fee-basis-points)
+    (ok true)
+  )
+)
+
+;; Fee collector address update
+(define-public (set-fee-collector (new-collector principal))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
+    (asserts! (not (is-eq new-collector 'SP000000000000000000002Q6VF78))
+      ERR_INVALID_AMOUNT
+    )
+    (var-set fee-collector new-collector)
+    (ok true)
+  )
+)
+
+;; READ-ONLY QUERY FUNCTIONS
+
+;; Retrieve payment by ID
+(define-read-only (get-payment (payment-id uint))
+  (map-get? payments payment-id)
+)
+
+;; Retrieve payment by business reference
+(define-read-only (get-payment-by-reference
+    (business principal)
+    (reference (string-ascii 64))
+  )
+  (let ((payment-id (map-get? payment-references {
+      business: business,
+      reference: reference,
+    })))
+    (match payment-id
+      id (map-get? payments id)
+      none
+    )
+  )
+)
