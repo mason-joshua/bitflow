@@ -370,3 +370,57 @@
     )
   )
 )
+
+;; Retrieve business information
+(define-read-only (get-business (business-principal principal))
+  (map-get? businesses business-principal)
+)
+
+;; Retrieve business balance
+(define-read-only (get-business-balance (business-principal principal))
+  (default-to u0 (map-get? business-balances business-principal))
+)
+
+;; Retrieve current platform fee
+(define-read-only (get-platform-fee)
+  (var-get platform-fee-basis-points)
+)
+
+;; Retrieve fee collector address
+(define-read-only (get-fee-collector)
+  (var-get fee-collector)
+)
+
+;; Calculate fee breakdown
+(define-read-only (calculate-fees
+    (amount uint)
+    (business-fee-rate uint)
+  )
+  (let (
+      (platform-fee (/ (* amount (var-get platform-fee-basis-points)) u10000))
+      (business-fee (/ (* amount business-fee-rate) u10000))
+    )
+    {
+      platform-fee: platform-fee,
+      business-fee: business-fee,
+      total-fees: (+ platform-fee business-fee),
+      net-amount: (- amount (+ platform-fee business-fee)),
+    }
+  )
+)
+
+;; Validate payment status
+(define-read-only (is-payment-valid (payment-id uint))
+  (match (map-get? payments payment-id)
+    payment (and
+      (is-eq (get status payment) "pending")
+      (< stacks-block-height (get expires-at payment))
+    )
+    false
+  )
+)
+
+;; Retrieve next payment ID
+(define-read-only (get-next-payment-id)
+  (var-get next-payment-id)
+)
